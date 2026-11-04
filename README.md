@@ -122,33 +122,28 @@ When all sensors lose track of the line ($\sum_{i=0}^4 s_i = 0$):
 ## Tuning Parameters & Bluetooth Commands
 
 ### Default Parameters
-Configured in [Config.h](file:///home/divyansh/Projects/LineFollower/include/Config.h):
+Configured in [Config.h](file:///home/divyansh/Projects/LineFollower/include/Config.h) as pure 16-bit integers (`int16_t`) for zero FPU emulation overhead:
 
 | Parameter | Default Value | Description |
 | :--- | :--- | :--- |
-| `Kp` | `105.0` | Proportional gain (responsiveness to instantaneous error) |
-| `Kd` | `25.0` | Derivative gain (damping oscillations and overshoot) |
-| `Ki` | `0.0` | Integral gain (steady-state offset elimination) |
+| `Kp` | `105` | Proportional gain (responsiveness to error) |
+| `Kd` | `25` | Derivative gain (damping oscillations) |
 | `baseSpeed` | `40` | Default forward PWM duty cycle (0–255) |
 | `searchSpeed`| `80` | Spin recovery PWM duty cycle when line is lost (0–255) |
 
-### Real-Time HC-05 BLE / Serial Commands
-Connect to the HC-05 via any Serial Bluetooth Terminal app (baud: `9600`) to tune parameters live while testing:
+### Pure Numbers Protocol (HC-05 BLE / UART)
+The robot firmware uses no parser classes or string matching. Parameters are sent and echoed back as pure space-separated numbers:
 
-| Command | Example | Description |
-| :--- | :--- | :--- |
-| `p <val>` / `kp <val>` | `p 120` or `p=120` | Set Proportional Gain ($K_p$) |
-| `d <val>` / `kd <val>` | `d 30` or `d=30` | Set Derivative Gain ($K_d$) |
-| `i <val>` / `ki <val>` | `i 0.5` | Set Integral Gain ($K_i$) |
-| `b <val>` / `base <val>` | `b 50` | Set Base Speed (0–255) |
-| `search <val>` | `search 90` | Set Line-Lost Search Speed (0–255) |
-| `start` / `run` | `start` | Start the robot |
-| `stop` / `halt` | `stop` | Stop the robot |
-| `toggle` | `toggle` | Toggle run/stop state |
-| `status` / `?` | `status` | View all current settings & state |
-| `help` / `h` | `help` | Print command cheat sheet |
+$$\text{Format: } \langle K_p \rangle \quad \langle K_d \rangle \quad \langle \text{baseSpeed} \rangle \quad \langle \text{searchSpeed} \rangle \quad \langle \text{running} \rangle$$
 
-*(Tip: Sending `p`, `d`, `i`, `b`, or `search` with no value queries the current setting).*
+| Input | Example | Behavior | Robot Echo |
+| :--- | :--- | :--- | :--- |
+| `1` | `1` | Start the robot | `105 25 40 80 1` |
+| `0` | `0` | Stop the robot | `105 25 40 80 0` |
+| `<kp> <kd>` | `120 30` | Update $K_p$ and $K_d$ | `120 30 40 80 0` |
+| `<kp> <kd> <base>` | `120 30 50` | Update $K_p$, $K_d$, and Base Speed | `120 30 50 80 0` |
+| `<kp> <kd> <base> <search> <run>` | `120 30 50 80 1` | Update all parameters and run | `120 30 50 80 1` |
+| *(empty newline)* | `\n` | Query current parameters | `105 25 40 80 0` |
 
 ---
 
@@ -158,14 +153,14 @@ Connect to the HC-05 via any Serial Bluetooth Terminal app (baud: `9600`) to tun
 .
 ├── include/
 │   ├── Button.h          # Non-blocking debounced edge trigger for button and BT pin
-│   ├── CommandParser.h   # Real-time HC-05 Bluetooth command parser & tuner
 │   ├── Config.h          # Hardware pinouts and default configuration constants
 │   ├── MotorDriver.h     # Zero-cost TB6612FNG dual motor driver abstraction
-│   ├── PIDController.h   # PD/PID controller with dynamic tuning & anti-windup
+│   ├── PIDController.h   # Fast 16-bit integer PD controller
 │   ├── SensorArray.h     # 5-channel digital IR sensor reader & error calculator
 │   └── README            # PlatformIO include documentation
 ├── src/
-│   └── main.cpp          # Clean, decoupled application entry point
+│   └── main.cpp          # Clean, decoupled application entry point (pure numbers)
+├── controller.py         # Python controller & live tuner (pure numbers protocol)
 ├── old.cpp               # Original monolithic reference implementation
 ├── platformio.ini        # PlatformIO environment configuration (nanoatmega328)
 └── README.md             # Project documentation
@@ -201,6 +196,61 @@ Connect to the HC-05 via any Serial Bluetooth Terminal app (baud: `9600`) to tun
    ```bash
    pio device monitor
    ```
+
+---
+
+## Python Controller & Live Tuner
+
+A Python utility ([controller.py](file:///home/divyansh/Projects/LineFollower/controller.py)) is included to tune PID gains, adjust motor speeds, and control the robot live over Bluetooth (or USB Serial).
+
+### 1. Requirements
+```bash
+pip install pyserial rich
+```
+
+### 2. Connect via Bluetooth (HC-05)
+On Linux, pair the HC-05 and bind it to an RFCOMM port:
+```bash
+# Pair and bind (replace with your HC-05 MAC address)
+sudo rfcomm bind 0 98:D3:31:XX:XX:XX
+# Created device is /dev/rfcomm0
+```
+*(On Windows or macOS, pair the HC-05 in system Bluetooth settings to obtain a virtual COM port like `COM3` or `/dev/cu.HC-05`).*
+
+### 3. Interactive Live Tuning Session
+Launch the interactive tuning shell:
+```bash
+./controller.py
+# Or specify port directly:
+./controller.py --port /dev/rfcomm0
+```
+
+Inside the interactive shell:
+- **`p 120`** / **`d 30`** / **`b 50`**: Set parameters directly.
+- **`+p`** / **`-p`**: Increment / decrement $K_p$ by step size.
+- **`+d`** / **`-d`**: Increment / decrement $K_d$ by step size.
+- **`+b`** / **`-b`**: Increment / decrement Base Speed by step size.
+- **`step kp 2.5`**: Change the increment step size.
+- **`start`** / **`stop`** / **`toggle`**: Control robot run state.
+- **`save fast_track`**: Save active values to `fast_track.json`.
+- **`load fast_track`**: Load and apply profile from `fast_track.json`.
+- **`status`** / **`?`**: Print formatted parameter status table.
+- **`q`** / **`exit`**: Safely stop motors and exit.
+
+### 4. Direct CLI Commands (Single-shot / Scripting)
+```bash
+# Set parameters and start
+./controller.py --port /dev/rfcomm0 --kp 115 --kd 28 --base 45 --start
+
+# Query robot status
+./controller.py --port /dev/rfcomm0 --status
+
+# Send emergency stop
+./controller.py --port /dev/rfcomm0 --stop
+
+# Apply a saved profile
+./controller.py --port /dev/rfcomm0 --load fast_track.json
+```
 
 ---
 

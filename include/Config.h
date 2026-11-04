@@ -31,11 +31,10 @@ namespace Config {
         constexpr uint8_t BT_START_PIN = 7; // HC-05 Start / State trigger pin
     }
 
-    // Default Control & Tuning Parameters
+    // Default Control & Tuning Parameters (Simple Ints)
     namespace Defaults {
-        constexpr float KP = 105.0f;
-        constexpr float KD = 25.0f;
-        constexpr float KI = 0.0f;
+        constexpr int16_t KP = 105;
+        constexpr int16_t KD = 25;
 
         constexpr int16_t BASE_SPEED = 40;
         constexpr int16_t SEARCH_SPEED = 80;
